@@ -58,9 +58,17 @@ def extract_with_ollama(text: str, ollama_url: str, model: str) -> dict:
         json=payload,
         timeout=120.0,
     )
-    response.raise_for_status()
+    
+    # Model henüz yükleniyorsa Ollama hata dönebilir veya boş kalabilir
+    if response.status_code != 200:
+        log.error(f"Ollama hata döndü ({response.status_code}): {response.text}")
+        raise ValueError(f"Ollama servisi hazır değil: {response.text}")
 
-    content = response.json()["message"]["content"]
+    content = response.json().get("message", {}).get("content", "")
+    if not content:
+        log.warning("Ollama'dan boş yanıt geldi! Model hala yükleniyor olabilir.")
+        raise ValueError("Ollama boş yanıt döndü.")
+
     log.info(f"Ollama yanıtı: {content[:200]}")
 
     # JSON parse
