@@ -44,7 +44,7 @@ def handler(job):
     try:
         import os
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        model = os.getenv("OLLAMA_MODEL", "llama3")
+        model = os.getenv("OLLAMA_MODEL", "qwen2.5:32b")
         result = process_rfq(file_bytes, ollama_url, model)
     except Exception as e:
         log.error(f"Hata: {e}")

@@ -8,3 +8,5 @@ langchain-huggingface
 python-dotenv
 fastapi
 uvicorn
+onnxruntime-gpu
+easyocr
