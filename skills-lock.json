@@ -21,6 +21,11 @@
       "sourceType": "github",
       "computedHash": "fa51843cda87fc738f819c937cc697691255684d27d598dbc64a3a121e480064"
     },
+    "langchain-architecture": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "0cdd844e5af5d2c47e3faf31ba9b9f1b86a611edecc72e2021688c0b6cce6938"
+    },
     "python-project-structure": {
       "source": "wshobson/agents",
       "sourceType": "github",

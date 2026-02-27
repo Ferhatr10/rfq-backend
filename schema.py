@@ -1,3 +1,6 @@
+from typing import List, Optional, Union
+from pydantic import BaseModel, Field
+
 # ─────────────────────────────────────────────
 # RFQ ŞEMASI — buraya kendi alanlarını ekle
 # Her alan için: "alan_adi": "açıklama"
@@ -17,17 +20,19 @@ RFQ_FIELDS = {
     "operating_conditions": "Operating environment and conditions (e.g. temperature range, humidity, pressure)",
 }
 
-# Beklenen JSON çıktısı:
-# {
-#   "component_name": {"value": "Bracket Assembly", "confidence": 95},
-#   "manufacturing_process": {"value": "CNC Machining", "confidence": 90},
-#   "material_spec": {"value": "SS316L", "confidence": 85},
-#   "certifications": {"value": ["ISO 9001", "IATF 16949"], "confidence": 80},
-#   "regulatory": {"value": ["RoHS", "REACH"], "confidence": 75},
-#   "industry": {"value": "Automotive", "confidence": 95},
-#   "surface_treatment": {"value": "Zinc plating", "confidence": 70},
-#   "lifetime": {"value": "10 years", "confidence": 60},
-#   "sop_date": {"value": "2025-06-01", "confidence": 80},
-#   "weight": {"value": "450g", "confidence": 65},
-#   "operating_conditions": {"value": "-40°C to +85°C", "confidence": 75}
-# }
+class RFQField(BaseModel):
+    value: Optional[Union[str, List[str]]] = Field(None, description="The extracted value for the field")
+    confidence: int = Field(0, ge=0, le=100, description="Confidence score from 0 to 100")
+
+class RFQResponse(BaseModel):
+    component_name: RFQField = Field(..., description=RFQ_FIELDS["component_name"])
+    manufacturing_process: RFQField = Field(..., description=RFQ_FIELDS["manufacturing_process"])
+    material_spec: RFQField = Field(..., description=RFQ_FIELDS["material_spec"])
+    certifications: RFQField = Field(..., description=RFQ_FIELDS["certifications"])
+    regulatory: RFQField = Field(..., description=RFQ_FIELDS["regulatory"])
+    industry: RFQField = Field(..., description=RFQ_FIELDS["industry"])
+    surface_treatment: RFQField = Field(..., description=RFQ_FIELDS["surface_treatment"])
+    lifetime: RFQField = Field(..., description=RFQ_FIELDS["lifetime"])
+    sop_date: RFQField = Field(..., description=RFQ_FIELDS["sop_date"])
+    weight: RFQField = Field(..., description=RFQ_FIELDS["weight"])
+    operating_conditions: RFQField = Field(..., description=RFQ_FIELDS["operating_conditions"])
