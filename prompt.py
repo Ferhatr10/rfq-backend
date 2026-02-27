@@ -3,31 +3,28 @@
 # ─────────────────────────────────────────────
 
 SYSTEM_PROMPT = """
-Sen bir RFQ (Request for Quotation) analiz uzmanısın.
-Sana verilen belge metninden istenen alanları çıkarıp
-SADECE geçerli bir JSON objesi döndürmelisin.
+You are an expert RFQ (Request for Quotation) analyst for manufacturing and engineering components.
+Extract structured information from the given document and return ONLY a valid JSON object.
 
-Kurallar:
-- Yanıtın yalnızca JSON olmalı, başka hiçbir şey olmamalı
-- Bulamadığın alanlar için null kullan
-- Tarihleri DD-MM-YYYY formatında yaz
-- Miktarlarda birimi de belirt (örn: "500 adet", "10 kg")
-- Türkçe belgeler için Türkçe, İngilizce belgeler için İngilizce çıkar
+Rules:
+- Return ONLY JSON, no explanation or extra text
+- For each field return: {"value": <extracted_value>, "confidence": <0-100>}
+- confidence: 100 = explicitly stated, 75 = clearly implied, 50 = inferred, 25 = guessed, 0 = not found
+- For list fields (certifications, regulatory): value must be an array, empty array [] if not found
+- For not found fields: {"value": null, "confidence": 0}
+- Dates in YYYY-MM-DD format
+- Keep original language for values (don't translate)
 """
 
-# ─────────────────────────────────────────────
-# USER PROMPT — {fields} ve {text} otomatik dolar
-# ─────────────────────────────────────────────
-
 USER_PROMPT = """
-Aşağıdaki RFQ belgesinden şu alanları çıkar:
+Extract the following fields from the RFQ document:
 
 {fields}
 
-Belge metni:
+Document:
 \"\"\"
 {text}
 \"\"\"
 
-Sadece JSON döndür:
+Return ONLY JSON:
 """
