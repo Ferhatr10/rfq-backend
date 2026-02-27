@@ -20,6 +20,12 @@ COPY . .
 # Docling modellerini önceden indir (build sırasında)
 RUN python -c "from docling.document_converter import DocumentConverter; DocumentConverter()"
 
+# Ollama modellerini önceden indir (build sırasında)
+RUN ollama serve & \
+    sleep 5 && \
+    ollama pull llama3 && \
+    pkill ollama
+
 # Başlatma scripti
 COPY start.sh /start.sh
 RUN chmod +x /start.sh

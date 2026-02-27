@@ -13,8 +13,9 @@ until curl -sf http://localhost:11434/api/tags > /dev/null; do
   sleep 1
 done
 
-echo "► Model indiriliyor: $MODEL"
-ollama pull $MODEL
+# Modeller artık imajın içinde (pre-baked), tekrar indirmeye gerek yok
+# echo "► Model indiriliyor: $MODEL"
+# ollama pull $MODEL
 
 echo "► RunPod handler başlatılıyor..."
 python handler.py
