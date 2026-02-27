@@ -29,5 +29,14 @@ echo "► $MODEL hazır!"
 # echo "► Model indiriliyor: $MODEL"
 # ollama pull $MODEL
 
-echo "► RunPod handler başlatılıyor..."
-python handler.py
+echo "► Başlatma modu kontrol ediliyor..."
+if [ "$RUNPOD_SERVERLESS" = "true" ]; then
+  echo "► Mod: RunPod Serverless"
+  echo "► RunPod handler başlatılıyor..."
+  python handler.py
+else
+  echo "► Mod: Standalone Pod (FastAPI)"
+  echo "► FastAPI sunucusu başlatılıyor..."
+  # API portunu 8080 olarak varsayıyoruz, RunPod Pod'larda genelde bu port kullanılır.
+  python api.py
+fi
