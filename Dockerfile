@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 # Sistem bağımlılıkları (Docling için)
 RUN apt-get update && apt-get install -y \
-    libgl1 libglib2.0-0 libgomp1 curl zstd \
+    libgl1 libglib2.0-0 libgomp1 curl zstd procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Ollama kur (aynı container içinde çalışacak)
