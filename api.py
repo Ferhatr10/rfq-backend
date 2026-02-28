@@ -11,11 +11,15 @@ from extractor import process_rfq
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="Docling RFQ Processor API")
+app = FastAPI(
+    title="RFQ Intelligence & Supplier Discovery API",
+    description="Automated RFQ data extraction and hybrid supplier search engine.",
+    version="2.0.0"
+)
 
 @app.get("/")
 def root():
-    return {"message": "Docling RFQ Processor API is running. Use Streamlit UI for interaction."}
+    return {"message": "RFQ Intelligence API is online. Access /docs for documentation."}
 
 class RFQRequest(BaseModel):
     pdf_base64: str
@@ -25,7 +29,33 @@ class RFQRequest(BaseModel):
 def health_check():
     return {"status": "healthy"}
 
-@app.post("/process")
+@app.post("/extract-pdf", tags=["Extraction"])
+async def extract_pdf(file: UploadFile = File(...)):
+    """
+    Direct PDF upload endpoint. 
+    Accepts raw multipart/form-data. Base64 encoding NOT required.
+    """
+    file_bytes = await file.read()
+    log.info(f"Direct upload started: {file.filename} ({len(file_bytes) / 1024 / 1024:.2f} MB)")
+    
+    start_time = time.time()
+    try:
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+        model = os.getenv("OLLAMA_MODEL", "qwen2.5:32b")
+        result = process_rfq(file_bytes, ollama_url, model)
+        
+        elapsed = round(time.time() - start_time, 2)
+        return {
+            "success": True,
+            "filename": file.filename,
+            "elapsed_seconds": elapsed,
+            "data": result
+        }
+    except Exception as e:
+        log.error(f"Extraction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/process", tags=["Extraction"], include_in_schema=False)
 def process_pdf(request: RFQRequest):
     """
     HTTP endpoint for regular Pod execution.
@@ -68,8 +98,8 @@ class SearchRequest(BaseModel):
     strict_mode: bool = True  # Yeni eklenen parametre (Varsayılan: True)
     top_k: int = 5
 
-@app.post("/search")
-def search_suppliers(request: SearchRequest):
+@app.post("/discovery", tags=["Discovery"])
+def hybrid_search(request: SearchRequest):
     """
     Hibrit arama endpoint'i.
     - strict_mode=true: Kriterlere uymayanları eler.

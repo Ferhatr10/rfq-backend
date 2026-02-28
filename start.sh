@@ -10,6 +10,10 @@ echo "► PostgreSQL başlatılıyor..."
 service postgresql start
 
 echo "► Veritabanı yapılandırılıyor..."
+# Postgres şifresini belirle (Python uygulamanın bağlanabilmesi için)
+export PGPASSWORD=${DB_PASSWORD:-"postgres"}
+su - postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD '$PGPASSWORD';\""
+
 # rfq_db adında veritabanını oluştur ve gerekli extension'ları ekle
 su - postgres -c "psql -c 'CREATE DATABASE rfq_db;'" || echo "Veritabanı zaten mevcut olabilir."
 su - postgres -c "psql -d rfq_db -c 'CREATE EXTENSION IF NOT EXISTS vector;'"
@@ -55,8 +59,17 @@ if [ "$RUNPOD_SERVERLESS" = "true" ]; then
   echo "► RunPod handler başlatılıyor..."
   python handler.py
 else
-  echo "► Mod: Standalone Pod (Streamlit Dashboard)"
-  echo "► Streamlit dashboard başlatılıyor..."
-  # RunPod proxy'si için CORS ve XSRF korumasını devre dışı bırakıyoruz (WebSocket hatasını çözer)
-  streamlit run ui.py --server.port 8080 --server.address 0.0.0.0 --server.enableCORS false --server.enableXsrfProtection false
+  echo "► Mod: Standalone Pod (FastAPI Backend)"
+  echo "► FastAPI sunucusu başlatılıyor..."
+  
+  # Port çakışmasını önlemek için eski süreçleri temizle
+  pkill -f uvicorn || true
+  
+  # Port numarasını ayarlanabilir yap (Varsayılan 8080)
+  PORT=${PORT:-8080}
+  echo "► API portu: $PORT"
+  
+  # FastAPI uygulamasını başlat
+  # --proxy-headers ve --forwarded-allow-ips '*' RunPod proxy arkasında çalışması için önemlidir.
+  uvicorn api:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'
 fi

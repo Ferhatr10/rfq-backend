@@ -62,6 +62,11 @@ class HybridSearchEngine:
         formatted_results = []
         for res in results:
             s_id, name, r_certs, r_regs, r_mats, rating, desc, v_score, m_bonus = res
+            
+            # Type casting to prevent float + Decimal mismatch
+            v_score = float(v_score) if v_score is not None else 0.0
+            m_bonus = float(m_bonus) if m_bonus is not None else 0.0
+            
             formatted_results.append({
                 "supplier_id": s_id,
                 "name": name,

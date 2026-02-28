@@ -4,10 +4,13 @@ from psycopg2.extras import execute_values
 import numpy as np
 
 # DB Connection settings (internal)
-# Sunucuda çalıştığınız için host ve port belirtmezsek Unix Socket üzerinden bağlanır (şifre istemez).
+# Sunucuda çalıştığınız için host ve port belirtmezsek Unix Socket üzerinden bağlanır.
+# Ancak bazen yetki sorunları nedeniyle şifre isteyebilir, bu yüzden localhost + şifre ekliyoruz.
 DB_CONFIG = {
     "dbname": "rfq_db",
-    "user": "postgres"
+    "user": "postgres",
+    "password": os.getenv("PGPASSWORD", "postgres"),
+    "host": os.getenv("DB_HOST", "localhost")
 }
 
 def get_connection():
