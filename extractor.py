@@ -1,134 +1,184 @@
 import logging
 import tempfile
 from pathlib import Path
+from typing import List, Dict, Any
 
 from langchain_docling import DoclingLoader
+from langchain_docling.loader import ExportType          # <-- eklendi
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 
-from schema import RFQResponse, RFQ_FIELDS
-from prompt import SYSTEM_PROMPT
-
+from docling.chunking import HybridChunker               # <-- eklendi
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions, EasyOcrOptions, RapidOcrOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+
+from schema import Pass1Extraction, SupplierSearchProfile
+from prompt import (
+    PASS1_SYSTEM_PROMPT, PASS1_USER_PROMPT,
+    PASS2_SYSTEM_PROMPT, PASS2_USER_PROMPT,
+)
 
 log = logging.getLogger(__name__)
 
-def get_optimized_converter():
-    """Docling'i yüksek hassasiyetli OCR (EasyOCR) ile yapılandırır."""
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────────────────────────────────────────
+PASS1_MODEL   = "qwen2.5:14b"
+PASS2_MODEL   = "qwen2.5:14b"
+EMBED_MODEL   = "sentence-transformers/all-MiniLM-L6-v2"   # sadece tokenizer için
+MAX_CHUNKS    = 20          # uzun dokümanlar için güvenlik sınırı
+MAX_TOKENS    = 1500        # HybridChunker token limiti
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DOCLING — hız odaklı OCR-sız converter
+# ─────────────────────────────────────────────────────────────────────────────
+def get_fast_converter() -> DocumentConverter:
+    """Docling'i OCR'sız (yüksek hız) yapılandırır. Doğal PDF'ler için idealdir."""
     pipeline_options = PdfPipelineOptions()
-    pipeline_options.do_ocr = True
-    
-    # EasyOCR, tesserocr'ın kurulum hatalarından kaçınmak için güçlü bir alternatiftir.
-    ocr_options = EasyOcrOptions()
-    ocr_options.lang = ["en", "de"]
-    ocr_options.force_full_page_ocr = True  # KRİTİK: Bozuk text layer'ı atla ve her sayfada gerçek OCR yap
-    pipeline_options.ocr_options = ocr_options
-    
+    pipeline_options.do_ocr = False
+
     return DocumentConverter(format_options={
         InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
     })
 
-def extract_with_langchain(file_bytes: bytes, ollama_url: str, model: str) -> dict:
-    """PDF'i yapılandırılmış OCR ile yükler, parçalara böler ve LangChain + Ollama ile veri çıkarır."""
-    
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PASS 1 HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+def merge_pass1_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Pass 1 sonuçlarını birleştirir.
+    - Tekil alanlar  → son dolu değeri alır
+    - Liste alanları → birleştirir + deduplicate
+    """
+    merged: Dict[str, Any] = {
+        "component_name": None,
+        "material_specifications": [],
+        "certifications_mentioned": [],
+        "weight_and_dimensions": None,
+        "surface_treatments": [],
+    }
+
+    for res in results:
+        if res.get("component_name"):
+            merged["component_name"] = res["component_name"]
+        if res.get("weight_and_dimensions"):
+            merged["weight_and_dimensions"] = res["weight_and_dimensions"]
+
+        for field in ("material_specifications", "certifications_mentioned", "surface_treatments"):
+            vals = res.get(field)
+            if vals and isinstance(vals, list):
+                merged[field].extend(vals)
+
+    # Deduplicate
+    for key in ("material_specifications", "certifications_mentioned", "surface_treatments"):
+        merged[key] = list(set(merged[key]))
+
+    return merged
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CORE — Two-Pass Extraction
+# ─────────────────────────────────────────────────────────────────────────────
+def extract_with_langchain(file_bytes: bytes, ollama_url: str) -> dict:
+    """
+    Two-Pass Agentic RAG:
+        Pass 1 (qwen2.5:7b)  — Map:    Her chunk'tan ham veri çıkar
+        Pass 2 (qwen2.5:32b) — Reduce: Ham verileri SupplierSearchProfile'a sentezle
+
+    DEĞİŞİKLİK (eski → yeni):
+        MARKDOWN + MarkdownHeaderTextSplitter
+        → DOC_CHUNKS + HybridChunker
+
+    Neden?
+        HybridChunker başlık hiyerarşisini, tablo bağlamını ve token sınırını
+        aynı anda korur. Tablo satırları ve teknik değerler artık yarıda kesilmiyor.
+    """
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(file_bytes)
         tmp_path = Path(tmp.name)
 
     try:
-        # Standart DoclingLoader yerine optimize edilmiş converter kullanıyoruz
-        converter = get_optimized_converter()
-        loader = DoclingLoader(file_path=str(tmp_path), converter=converter)
-        
+        # ── 1. LOAD — DOC_CHUNKS modu ────────────────────────────────────────
+        converter = get_fast_converter()
+        loader = DoclingLoader(
+            file_path=str(tmp_path),
+            converter=converter,
+            export_type=ExportType.DOC_CHUNKS,          # ← MARKDOWN yerine
+            chunker=HybridChunker(
+                tokenizer=EMBED_MODEL,                  # token sınırı için tokenizer
+                max_tokens=MAX_TOKENS,
+                merge_peers=True,                       # komşu küçük parçaları birleştir
+            ),
+        )
         docs = loader.load()
-        full_text = "\n\n".join([doc.page_content for doc in docs])
-        log.info(f"Doküman yüklendi, toplam karakter: {len(full_text)}")
-        
-        # DEBUG: Raw metni konsola da yaz ki serverda dosya aramayalım
-        log.info(f"--- HAM METİN BAŞLANGICI (İLK 1000 KRK) ---\n{full_text[:1000]}\n--- HAM METİN SONU ---")
-        
-        # DEBUG: Raw text'i dosyaya yaz
-        debug_path = Path("debug_raw_text.md")
-        debug_path.write_text(full_text, encoding="utf-8")
-        log.info(f"Ham metin debug için kaydedildi: {debug_path.absolute()}")
+        log.info(f"Doküman yüklendi: {len(docs)} chunk")
 
-        llm = ChatOllama(model=model, base_url=ollama_url, format="json", temperature=0)
-        structured_llm = llm.with_structured_output(RFQResponse)
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("user", "Extract RFQ details from this document chunk:\n\n{text}"),
-        ])
-        chain = prompt | structured_llm
+        # ── 2. PASS 1 — THE EXTRACTOR (Map Phase) ────────────────────────────
+        extractor_llm = ChatOllama(
+            model=PASS1_MODEL,
+            base_url=ollama_url,
+            format="json",
+            temperature=0,
+        )
+        structured_extractor = extractor_llm.with_structured_output(Pass1Extraction)
+        extractor_chain = (
+            ChatPromptTemplate.from_messages([
+                ("system", PASS1_SYSTEM_PROMPT),
+                ("user",   PASS1_USER_PROMPT),
+            ])
+            | structured_extractor
+        )
 
-        # Chunking ayarları (Granite 3.1 128k context desteğine sahip)
-        # 32.000 karakter (~8k-10k token) güvenli ve hızlı bir aralıktır
-        chunk_size = 32000
-        overlap = 4000
-        chunks = [full_text[i:i + chunk_size] for i in range(0, len(full_text), chunk_size - overlap)]
-        
-        log.info(f"Doküman {len(chunks)} parçaya bölündü.")
-        
-        # Sonuçları biriktirmek için boş bir yapı oluştur (null/0 confidence ile)
-        final_data = {}
-        # RFQResponse alanlarını örnekleyerek başla
-        empty_response = RFQResponse.model_construct()
-        for field_name in empty_response.model_fields:
-            final_data[field_name] = {"value": None, "confidence": 0}
-
-        # Parça parça döngü
-        for idx, chunk_text in enumerate(chunks):
-            log.info(f"Parça {idx+1}/{len(chunks)} işleniyor...")
+        raw_results: List[Dict[str, Any]] = []
+        for idx, doc in enumerate(docs[:MAX_CHUNKS]):
+            log.info(f"Pass 1 — chunk {idx + 1}/{min(len(docs), MAX_CHUNKS)} "
+                     f"({len(doc.page_content)} chars)")
             try:
-                # Sadece doküman çok uzunsa ilk 10 parçayı işle (zaman/performans için koruma)
-                if idx >= 15: 
-                    log.warning("Çok uzun doküman, güvenlik sınırı (15 parça) nedeniyle durduruldu.")
-                    break
+                res = extractor_chain.invoke({"markdown_chunk_text": doc.page_content})
+                raw_results.append(res.model_dump())
+            except Exception as e:
+                log.warning(f"  Chunk {idx} atlandı: {e}")
 
-                response = chain.invoke({"text": chunk_text})
-                chunk_results = response.model_dump()
+        # ── 3. MERGE ──────────────────────────────────────────────────────────
+        merged_data = merge_pass1_results(raw_results)
+        log.info(f"Pass 1 tamamlandı — {len(raw_results)} chunk birleştirildi.")
 
-                # Merge Logic
-                for field_name, result in chunk_results.items():
-                    current = final_data[field_name]
-                    new_val = result["value"]
-                    new_conf = result["confidence"]
+        # ── 4. PASS 2 — THE ORGANIZER (Reduce Phase) ─────────────────────────
+        organizer_llm = ChatOllama(
+            model=PASS2_MODEL,
+            base_url=ollama_url,
+            format="json",
+            temperature=0.1,
+        )
+        structured_organizer = organizer_llm.with_structured_output(SupplierSearchProfile)
+        organizer_chain = (
+            ChatPromptTemplate.from_messages([
+                ("system", PASS2_SYSTEM_PROMPT),
+                ("user",   PASS2_USER_PROMPT),
+            ])
+            | structured_organizer
+        )
 
-                    if new_val is None:
-                        continue
+        log.info("Pass 2 başlatılıyor — SupplierSearchProfile sentezleniyor…")
+        final_profile: SupplierSearchProfile = organizer_chain.invoke(
+            {"merged_json_from_pass_1": str(merged_data)}
+        )
 
-                    # Liste tipi alanlar için (birleştir ve deduplicate)
-                    if isinstance(new_val, list):
-                        if not isinstance(current["value"], list):
-                            current["value"] = []
-                        
-                        # Mevcut liste ile yeni listeyi birleştir ve kopyala (tekrarları temizle)
-                        combined_list = list(set(current["value"] + new_val))
-                        current["value"] = combined_list
-                        current["confidence"] = max(current["confidence"], new_conf)
-                    
-                    # Tekil alanlar için (en yüksek güven puanını tut)
-                    else:
-                        if new_conf > current["confidence"]:
-                            final_data[field_name] = result
-            
-            except Exception as chunk_err:
-                log.warning(f"Parça {idx+1} işlenirken hata oluştu (atlanıyor): {chunk_err}")
-                import traceback
-                log.debug(traceback.format_exc())
-                continue
-
-        return final_data
+        return final_profile.model_dump()
 
     except Exception as e:
-        log.error(f"LangChain extraction hatası: {e}")
+        log.error(f"Two-Pass Extraction hatası: {e}")
         raise
     finally:
         tmp_path.unlink(missing_ok=True)
 
 
-def process_rfq(file_bytes: bytes, ollama_url: str, model: str) -> dict:
-    """Ana fonksiyon: PDF → LangChain → JSON."""
-    return extract_with_langchain(file_bytes, ollama_url, model)
+# ─────────────────────────────────────────────────────────────────────────────
+# PUBLIC ENTRY POINT  (api.py ve handler.py buraya bağlı — değiştirme)
+# ─────────────────────────────────────────────────────────────────────────────
+def process_rfq(file_bytes: bytes, ollama_url: str, model: str = None) -> dict:
+    """Ana giriş noktası. api.py ve handler.py bu fonksiyonu çağırır."""
+    return extract_with_langchain(file_bytes, ollama_url)

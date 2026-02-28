@@ -41,7 +41,7 @@ async def extract_pdf(file: UploadFile = File(...)):
     start_time = time.time()
     try:
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        model = os.getenv("OLLAMA_MODEL", "qwen2.5:32b")
+        model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
         result = process_rfq(file_bytes, ollama_url, model)
         
         elapsed = round(time.time() - start_time, 2)
@@ -73,7 +73,7 @@ def process_pdf(request: RFQRequest):
     try:
         # Environment variables for Ollama
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        model = os.getenv("OLLAMA_MODEL", "qwen2.5:32b")
+        model = os.getenv("OLLAMA_MODEL", "qwen.2.5:14b")
         
         # Core processing logic
         result = process_rfq(file_bytes, ollama_url, model)
