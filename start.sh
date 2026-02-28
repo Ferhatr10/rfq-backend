@@ -5,6 +5,16 @@ set -e
 export OLLAMA_MODEL=${OLLAMA_MODEL:-"qwen2.5:32b"}
 MODEL=$OLLAMA_MODEL
 
+echo "► PostgreSQL başlatılıyor..."
+# PostgreSQL servisinin başlamasını sağla
+service postgresql start
+
+echo "► Veritabanı yapılandırılıyor..."
+# rfq_db adında veritabanını oluştur ve gerekli extension'ları ekle
+su - postgres -c "psql -c 'CREATE DATABASE rfq_db;'" || echo "Veritabanı zaten mevcut olabilir."
+su - postgres -c "psql -d rfq_db -c 'CREATE EXTENSION IF NOT EXISTS vector;'"
+su - postgres -c "psql -d rfq_db -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'"
+
 echo "► Ollama durumu kontrol ediliyor..."
 if curl -sf http://localhost:11434/api/tags > /dev/null; then
   echo "► Ollama zaten çalışıyor."
@@ -30,6 +40,11 @@ done
 sleep 2
 echo "► $MODEL hazır!"
 
+# Embedding modeli (RAG ve Hybrid Search için)
+echo "► nomic-embed-text embedding modeli kontrol ediliyor..."
+ollama pull nomic-embed-text
+echo "► nomic-embed-text hazır!"
+
 # Modeller artık imajın içinde (pre-baked), tekrar indirmeye gerek yok
 # echo "► Model indiriliyor: $MODEL"
 # ollama pull $MODEL
@@ -40,8 +55,8 @@ if [ "$RUNPOD_SERVERLESS" = "true" ]; then
   echo "► RunPod handler başlatılıyor..."
   python handler.py
 else
-  echo "► Mod: Standalone Pod (FastAPI)"
-  echo "► FastAPI sunucusu başlatılıyor..."
-  # API portunu 8080 olarak varsayıyoruz, RunPod Pod'larda genelde bu port kullanılır.
-  python api.py
+  echo "► Mod: Standalone Pod (Streamlit Dashboard)"
+  echo "► Streamlit dashboard başlatılıyor..."
+  # RunPod proxy'si için CORS ve XSRF korumasını devre dışı bırakıyoruz (WebSocket hatasını çözer)
+  streamlit run ui.py --server.port 8080 --server.address 0.0.0.0 --server.enableCORS false --server.enableXsrfProtection false
 fi

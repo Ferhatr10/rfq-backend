@@ -10,3 +10,8 @@ fastapi
 uvicorn
 onnxruntime-gpu
 easyocr
+psycopg2-binary
+pgvector
+streamlit
+pandas
+numpy

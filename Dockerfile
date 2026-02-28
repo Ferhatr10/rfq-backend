@@ -1,10 +1,16 @@
 FROM python:3.11-slim
 
-# Sistem bağımlılıkları (Docling & OCR için)
+# Sistem bağımlılıkları (Docling, OCR & PostgreSQL için)
 RUN apt-get update && apt-get install -y \
-    libgl1 libglib2.0-0 libgomp1 curl zstd procps build-essential \
+    libgl1 libglib2.0-0 libgomp1 curl zstd procps build-essential git \
     tesseract-ocr libtesseract-dev \
+    postgresql postgresql-contrib libpq-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# pgvector kur (source-build)
+RUN git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git /tmp/pgvector \
+    && cd /tmp/pgvector && make && make install \
+    && rm -rf /tmp/pgvector
 
 # Ollama kur (aynı container içinde çalışacak)
 RUN curl -fsSL https://ollama.com/install.sh | sh
