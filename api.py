@@ -176,21 +176,94 @@ def get_metadata():
         log.error(f"Metadata error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/ingest")
-def trigger_ingest(csv_path: str):
+@app.post("/ingest-file", tags=["Ingestion"])
+async def ingest_file(file: UploadFile = File(...)):
     """
-    Manuel veri yükleme tetikleyicisi.
+    Uzaktan dosya (CSV, JSON, SQLite) yükleme endpoint'i.
+    """
+    import tempfile
+    from pathlib import Path
+    from ingest import ingest_csv, ingest_json, ingest_sqlite
+    
+    file_bytes = await file.read()
+    ext = os.path.splitext(file.filename)[1].lower()
+    
+    # Geçici dosya oluştur
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = Path(tmp.name)
+        
+    try:
+        if ext == '.csv':
+            ingest_csv(str(tmp_path))
+        elif ext == '.json':
+            ingest_json(str(tmp_path))
+        elif ext in ['.db', '.sqlite', '.sqlite3']:
+            ingest_sqlite(str(tmp_path))
+        else:
+            raise HTTPException(status_code=400, detail="Desteklenmeyen dosya formatı.")
+            
+        return {"success": True, "message": f"{file.filename} başarıyla işlendi."}
+    except Exception as e:
+        log.error(f"Ingest file error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+@app.post("/ingest-data", tags=["Ingestion"])
+def ingest_data(data: list[dict]):
+    """
+    Doğrudan JSON listesi göndererek veri yükleme endpoint'i.
     """
     try:
-        from ingest import ingest_csv
+        from ingest import process_records
+        process_records(data)
+        return {"success": True, "message": f"{len(data)} kayıt başarıyla eklendi."}
+    except Exception as e:
+        log.error(f"Ingest data error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ingest", tags=["Ingestion"], deprecated=True)
+def trigger_ingest(csv_path: str):
+    """
+    Eski yöntem: Yerel dosya yolunu tetikler.
+    """
+    try:
+        from ingest import ingest_csv, ingest_json, ingest_sqlite
         if not os.path.exists(csv_path):
-            raise HTTPException(status_code=404, detail="CSV dosyası bulunamadı.")
+            raise HTTPException(status_code=404, detail="Dosya bulunamadı.")
         
-        # Arka planda çalıştırılabilir ama şimdilik senkron
-        ingest_csv(csv_path)
-        return {"success": True, "message": "Veriler başarıyla yüklendi."}
+        ext = os.path.splitext(csv_path)[1].lower()
+        if ext == '.csv':
+            ingest_csv(csv_path)
+        elif ext == '.json':
+            ingest_json(csv_path)
+        elif ext in ['.db', '.sqlite', '.sqlite3']:
+            ingest_sqlite(csv_path)
+        else:
+            raise HTTPException(status_code=400, detail="Geçersiz uzantı.")
+            
+        return {"success": True, "message": "İşlem tamamlandı."}
     except Exception as e:
         log.error(f"Ingest error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/reset-db", tags=["Maintenance"])
+def reset_db():
+    """
+    Tüm tedarikçi verilerini siler.
+    """
+    try:
+        from database import get_connection
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("TRUNCATE TABLE suppliers RESTART IDENTITY;")
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"success": True, "message": "Tüm veriler silindi, veritabanı sıfırlandı."}
+    except Exception as e:
+        log.error(f"Reset DB error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
