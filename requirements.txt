@@ -5,6 +5,7 @@ langchain-docling>=2.0.0
 langchain-core>=0.3.0
 langchain-ollama>=0.2.0
 langchain-huggingface
+langchain-text-splitters
 python-dotenv
 fastapi
 uvicorn
@@ -15,3 +16,5 @@ pgvector
 streamlit
 pandas
 numpy
+plotly
+requests

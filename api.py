@@ -17,6 +17,12 @@ app = FastAPI(
     version="2.0.0"
 )
 
+@app.on_event("startup")
+def startup_event():
+    from database import init_db
+    init_db()
+    log.info("Database initialized successfully.")
+
 @app.get("/")
 def root():
     return {"message": "RFQ Intelligence API is online. Access /docs for documentation."}
@@ -95,7 +101,10 @@ class SearchRequest(BaseModel):
     query: str
     certifications: list[str] = []
     regulatory: list[str] = []
-    strict_mode: bool = True  # Yeni eklenen parametre (Varsayılan: True)
+    countries: list[str] = []
+    near_city: str = None
+    radius_km: float = None
+    strict_mode: bool = True
     top_k: int = 5
 
 @app.post("/discovery", tags=["Discovery"])
@@ -112,12 +121,59 @@ def hybrid_search(request: SearchRequest):
             query=request.query, 
             certs=request.certifications, 
             regs=request.regulatory, 
+            near_city=request.near_city,
+            radius_km=request.radius_km,
+            countries=request.countries,
             strict_mode=request.strict_mode,
             top_k=request.top_k
         )
         return {"success": True, "results": results}
     except Exception as e:
         log.error(f"Search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/metadata", tags=["Discovery"])
+def get_metadata():
+    """
+    Returns unique metadata values for filtering:
+    - Countries
+    - Cities
+    - Certifications (Unnested)
+    - Regulatory (Unnested)
+    """
+    try:
+        from database import get_connection
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Unique Countries
+        cur.execute("SELECT DISTINCT country FROM suppliers WHERE country IS NOT NULL ORDER BY country;")
+        countries = [r[0] for r in cur.fetchall()]
+        
+        # Unique Cities
+        cur.execute("SELECT DISTINCT city FROM suppliers WHERE city IS NOT NULL ORDER BY city;")
+        cities = [r[0] for r in cur.fetchall()]
+        
+        # Unique Certifications
+        cur.execute("SELECT DISTINCT unnest(certifications) as cert FROM suppliers WHERE certifications IS NOT NULL ORDER BY cert;")
+        certs = [r[0] for r in cur.fetchall()]
+        
+        # Unique Regulatory
+        cur.execute("SELECT DISTINCT unnest(regulatory) as reg FROM suppliers WHERE regulatory IS NOT NULL ORDER BY reg;")
+        regs = [r[0] for r in cur.fetchall()]
+        
+        cur.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "countries": countries,
+            "cities": cities,
+            "certifications": certs,
+            "regulatory": regs
+        }
+    except Exception as e:
+        log.error(f"Metadata error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ingest")

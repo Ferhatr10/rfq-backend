@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 PASS1_MODEL   = "qwen2.5:14b"
 PASS2_MODEL   = "qwen2.5:14b"
 EMBED_MODEL   = "sentence-transformers/all-MiniLM-L6-v2"   # sadece tokenizer için
-MAX_CHUNKS    = 20          # uzun dokümanlar için güvenlik sınırı
+MAX_CHUNKS    = 100         # uzun dokümanlar için güvenlik sınırı
 MAX_TOKENS    = 1500        # HybridChunker token limiti
 
 

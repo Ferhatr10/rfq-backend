@@ -61,6 +61,9 @@ def ingest_csv(csv_path):
                 lng = float(row['lng']) if row.get('lng') else None
             except:
                 lat, lng = None, None
+
+            city = row.get('city')
+            country = row.get('country')
             
             # Vektör oluştur
             log.info(f"Vektör oluşturuluyor ({count+1}): {name}")
@@ -68,9 +71,9 @@ def ingest_csv(csv_path):
             
             # INSERT (Yeni sütunlar dahil)
             cur.execute("""
-                INSERT INTO suppliers (supplier_id, name, certifications, regulatory, materials, sop_date, description, embedding, rating, lat, lng)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (s_id, name, certs, regu, materials, sop_date, full_desc, vector, rating, lat, lng))
+                INSERT INTO suppliers (supplier_id, name, certifications, regulatory, materials, sop_date, description, embedding, rating, lat, lng, city, country)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (s_id, name, certs, regu, materials, sop_date, full_desc, vector, rating, lat, lng, city, country))
             
             count += 1
             if count % 10 == 0:
