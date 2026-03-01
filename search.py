@@ -12,8 +12,8 @@ class HybridSearchEngine:
 
     def geocode_city(self, city: str):
         """
-        Nominatim API kullanarak şehir adını lat/lng'ye çevirir.
-        Sadece backend'de kullanılır.
+        Converts a city name to lat/lng using the Nominatim API.
+        Used only on the backend.
         """
         url = "https://nominatim.openstreetmap.org/search"
         headers = {"User-Agent": "Aria-Sourcing-Agent/1.0"}
@@ -38,12 +38,12 @@ class HybridSearchEngine:
     def search(self, query: str, certs: list = None, regs: list = None, near_city: str = None, 
                radius_km: float = None, countries: list = None, strict_mode: bool = True, top_k: int = 5):
         """
-        Gelişmiş hibrit arama:
-        - Vektör benzerliği (pgvector)
-        - Sert/Yumuşak filtreleme (certifications, regulatory)
-        - Coğrafi filtreleme ve mesafe bazlı puanlama (ST_DWithin, ST_Distance)
-        - Ülke bazlı filtreleme
-        - Trigram bazlı deduplication (pg_trgm)
+        Advanced hybrid search:
+        - Vector similarity (pgvector)
+        - Strict/Soft filtering (certifications, regulatory)
+        - Geospatial filtering and distance-based scoring (ST_DWithin, ST_Distance)
+        - Country-based filtering
+        - Trigram-based deduplication (pg_trgm)
         """
         query_vector = self.embeddings.embed_query(query)
         
@@ -63,7 +63,7 @@ class HybridSearchEngine:
         regs = regs or []
         countries = countries or None # psycopg2 handle None as NULL
         
-        # Karmaşık SQL sorgusu: Filtreleme, Skorlama ve Deduplication
+        # Complex SQL query: Filtering, Scoring, and Deduplication
         sql = """
         WITH filtered_suppliers AS (
             SELECT 
@@ -104,8 +104,8 @@ class HybridSearchEngine:
             FROM scored_suppliers
         ),
         deduplicated AS (
-            -- Similarity > 0.75 olanları en yüksek skorlu olanı tutacak şekilde eler
-            -- DISTINCT ON sadece tam eşleşmeler için iyidir, bu yüzden fuzzy logic (NOT EXISTS) kullanıyoruz
+            -- Deduplicates entries with similarity > 0.75, keeping the one with the highest score
+            -- DISTINCT ON is only good for exact matches, so we use fuzzy logic (NOT EXISTS)
             SELECT * FROM final_scored s1
             WHERE NOT EXISTS (
                 SELECT 1 FROM final_scored s2
@@ -123,7 +123,7 @@ class HybridSearchEngine:
         LIMIT %s;
         """
         
-        # Parametreleri düzenle
+        # Prepare parameters
         params = (
             query_vector, 
             strict_mode, certs, 
@@ -182,18 +182,18 @@ class HybridSearchEngine:
             "center_coords": [center_lat, center_lng] if center_lat and center_lng else None
         }
 
-# Test amaçlı
+# For testing
 if __name__ == "__main__":
     engine = HybridSearchEngine()
-    # Örnek arama
+    # Example search
     search_data = engine.search("high pressure aluminum casting", near_city="Mexico City", radius_km=500)
     for r in search_data["results"]:
         print(f"[{r['scores']['total_suitability']}] {r['name']} ({r['country']}) - {r['distance_km']} km")
 
-# Test amaçlı
+# For testing
 if __name__ == "__main__":
     engine = HybridSearchEngine()
-    # Örnek arama
+    # Example search
     search_data = engine.search("high pressure aluminum casting", certs=["ISO 9001"])
     for r in search_data["results"]:
         print(f"[{r['scores']['total_suitability']}] {r['name']} - {r['scores']}")

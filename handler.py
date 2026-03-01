@@ -14,20 +14,20 @@ def handler(job):
     """
     RunPod Serverless handler.
 
-    Beklenen input:
+    Expected input:
     {
         "input": {
             "pdf_base64": "<base64 encoded PDF>",
-            "filename": "rfq.pdf"   (opsiyonel)
+            "filename": "rfq.pdf"   (optional)
         }
     }
     """
     job_input = job.get("input", {})
 
-    # ── Validasyon ────────────────────────────────────────────────────────────
+    # ── Validation ────────────────────────────────────────────────────────────────────
     pdf_base64 = job_input.get("pdf_base64")
     if not pdf_base64:
-        return {"error": "pdf_base64 alanı zorunludur."}
+        return {"error": "pdf_base64 field is required."}
 
     filename = job_input.get("filename", "upload.pdf")
 
@@ -35,9 +35,9 @@ def handler(job):
     try:
         file_bytes = base64.b64decode(pdf_base64)
     except Exception as e:
-        return {"error": f"Base64 decode hatası: {str(e)}"}
+        return {"error": f"Base64 decode error: {str(e)}"}
 
-    log.info(f"İşlem başladı: {filename} ({len(file_bytes) / 1024 / 1024:.2f} MB)")
+    log.info(f"Processing started: {filename} ({len(file_bytes) / 1024 / 1024:.2f} MB)")
     start = time.time()
 
     # ── Extraction ────────────────────────────────────────────────────────────
@@ -47,11 +47,11 @@ def handler(job):
         model = os.getenv("OLLAMA_MODEL", "qwen2.5:32b")
         result = process_rfq(file_bytes, ollama_url, model)
     except Exception as e:
-        log.error(f"Hata: {e}")
+        log.error(f"Error: {e}")
         return {"error": str(e)}
 
     elapsed = round(time.time() - start, 2)
-    log.info(f"Tamamlandı: {elapsed}s")
+    log.info(f"Completed: {elapsed}s")
 
     return {
         "success": True,

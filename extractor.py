@@ -4,11 +4,11 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from langchain_docling import DoclingLoader
-from langchain_docling.loader import ExportType          # <-- eklendi
+from langchain_docling.loader import ExportType
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 
-from docling.chunking import HybridChunker               # <-- eklendi
+from docling.chunking import HybridChunker
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -27,8 +27,8 @@ log = logging.getLogger(__name__)
 PASS1_MODEL   = "qwen2.5:14b"
 PASS2_MODEL   = "qwen2.5:14b"
 EMBED_MODEL   = "sentence-transformers/all-MiniLM-L6-v2"   # sadece tokenizer için
-MAX_CHUNKS    = 100         # uzun dokümanlar için güvenlik sınırı
 MAX_TOKENS    = 1500        # HybridChunker token limiti
+SUPER_CHUNK_SIZE = 8000     # LLM'e gönderilecek birleştirilmiş maksimum karakter sınırı
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -85,16 +85,8 @@ def merge_pass1_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 def extract_with_langchain(file_bytes: bytes, ollama_url: str) -> dict:
     """
     Two-Pass Agentic RAG:
-        Pass 1 (qwen2.5:7b)  — Map:    Her chunk'tan ham veri çıkar
-        Pass 2 (qwen2.5:32b) — Reduce: Ham verileri SupplierSearchProfile'a sentezle
-
-    DEĞİŞİKLİK (eski → yeni):
-        MARKDOWN + MarkdownHeaderTextSplitter
-        → DOC_CHUNKS + HybridChunker
-
-    Neden?
-        HybridChunker başlık hiyerarşisini, tablo bağlamını ve token sınırını
-        aynı anda korur. Tablo satırları ve teknik değerler artık yarıda kesilmiyor.
+        Pass 1 (qwen2.5:14b) — Map:    Her chunk'tan ham veri çıkar
+        Pass 2 (qwen2.5:14b) — Reduce: Ham verileri SupplierSearchProfile'a sentezle
     """
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(file_bytes)
@@ -106,15 +98,38 @@ def extract_with_langchain(file_bytes: bytes, ollama_url: str) -> dict:
         loader = DoclingLoader(
             file_path=str(tmp_path),
             converter=converter,
-            export_type=ExportType.DOC_CHUNKS,          # ← MARKDOWN yerine
+            export_type=ExportType.DOC_CHUNKS,
             chunker=HybridChunker(
-                tokenizer=EMBED_MODEL,                  # token sınırı için tokenizer
+                tokenizer=EMBED_MODEL,
                 max_tokens=MAX_TOKENS,
-                merge_peers=True,                       # komşu küçük parçaları birleştir
+                merge_peers=True,
             ),
         )
         docs = loader.load()
-        log.info(f"Doküman yüklendi: {len(docs)} chunk")
+        log.info(f"Docling dokümanı böldü: {len(docs)} küçük chunk")
+
+        # ── YENİ: CONTEXT PACKING (Süper-Chunk Oluşturma) ────────────────────
+        # 300 tokenlik küçük parçaları ~8000 karakterlik devasa bloklar halinde birleştiriyoruz.
+        packed_chunks = []
+        current_super_chunk = ""
+
+        for doc in docs:
+            # Sınırı aşmıyorsa birleştir
+            if len(current_super_chunk) + len(doc.page_content) < SUPER_CHUNK_SIZE:
+                if current_super_chunk:
+                    current_super_chunk += "\n\n---\n\n"
+                current_super_chunk += doc.page_content
+            else:
+                # Sınır aşıldıysa paketle ve yeni bir pakete başla
+                if current_super_chunk:
+                    packed_chunks.append(current_super_chunk)
+                current_super_chunk = doc.page_content
+
+        # Kalan son parçayı da ekle
+        if current_super_chunk.strip():
+            packed_chunks.append(current_super_chunk)
+
+        log.info(f"Paketleme tamamlandı: {len(docs)} küçük chunk, {len(packed_chunks)} Süper-Chunk'a birleştirildi.")
 
         # ── 2. PASS 1 — THE EXTRACTOR (Map Phase) ────────────────────────────
         extractor_llm = ChatOllama(
@@ -133,18 +148,20 @@ def extract_with_langchain(file_bytes: bytes, ollama_url: str) -> dict:
         )
 
         raw_results: List[Dict[str, Any]] = []
-        for idx, doc in enumerate(docs[:MAX_CHUNKS]):
-            log.info(f"Pass 1 — chunk {idx + 1}/{min(len(docs), MAX_CHUNKS)} "
-                     f"({len(doc.page_content)} chars)")
+        
+        # Artık küçük doc'larda değil, bizim hazırladığımız geniş bağlamlı Süper-Chunk'larda dönüyoruz
+        for idx, super_chunk_text in enumerate(packed_chunks):
+            log.info(f"Pass 1 — Süper-Chunk {idx + 1}/{len(packed_chunks)} işleniyor "
+                     f"({len(super_chunk_text)} chars)")
             try:
-                res = extractor_chain.invoke({"markdown_chunk_text": doc.page_content})
+                res = extractor_chain.invoke({"markdown_chunk_text": super_chunk_text})
                 raw_results.append(res.model_dump())
             except Exception as e:
-                log.warning(f"  Chunk {idx} atlandı: {e}")
+                log.warning(f"  Süper-Chunk {idx + 1} atlandı: {e}")
 
         # ── 3. MERGE ──────────────────────────────────────────────────────────
         merged_data = merge_pass1_results(raw_results)
-        log.info(f"Pass 1 tamamlandı — {len(raw_results)} chunk birleştirildi.")
+        log.info(f"Pass 1 tamamlandı — {len(raw_results)} Süper-Chunk sonucu birleştirildi.")
 
         # ── 4. PASS 2 — THE ORGANIZER (Reduce Phase) ─────────────────────────
         organizer_llm = ChatOllama(
@@ -177,7 +194,7 @@ def extract_with_langchain(file_bytes: bytes, ollama_url: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PUBLIC ENTRY POINT  (api.py ve handler.py buraya bağlı — değiştirme)
+# PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
 def process_rfq(file_bytes: bytes, ollama_url: str, model: str = None) -> dict:
     """Ana giriş noktası. api.py ve handler.py bu fonksiyonu çağırır."""

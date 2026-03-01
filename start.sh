@@ -5,71 +5,71 @@ set -e
 export OLLAMA_MODEL=${OLLAMA_MODEL:-"qwen2.5:32b"}
 MODEL=$OLLAMA_MODEL
 
-echo "► PostgreSQL başlatılıyor..."
-# PostgreSQL servisinin başlamasını sağla
+echo "► Starting PostgreSQL..."
+# Ensure PostgreSQL service starts
 service postgresql start
 
-echo "► Veritabanı yapılandırılıyor..."
-# Postgres şifresini belirle (Python uygulamanın bağlanabilmesi için)
+echo "► Configuring database..."
+# Set Postgres password (required for Python app connection)
 export PGPASSWORD=${DB_PASSWORD:-"postgres"}
 su - postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD '$PGPASSWORD';\""
 
-# rfq_db adında veritabanını oluştur ve gerekli extension'ları ekle
-su - postgres -c "psql -c 'CREATE DATABASE rfq_db;'" || echo "Veritabanı zaten mevcut olabilir."
+# Create the rfq_db database and add required extensions
+su - postgres -c "psql -c 'CREATE DATABASE rfq_db;'" || echo "Database may already exist."
 su - postgres -c "psql -d rfq_db -c 'CREATE EXTENSION IF NOT EXISTS vector;'"
 su - postgres -c "psql -d rfq_db -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'"
 
-echo "► Ollama durumu kontrol ediliyor..."
+echo "► Checking Ollama status..."
 if curl -sf http://localhost:11434/api/tags > /dev/null; then
-  echo "► Ollama zaten çalışıyor."
+  echo "► Ollama is already running."
 else
-  echo "► Ollama başlatılıyor..."
+  echo "► Starting Ollama..."
   ollama serve &
-  # Ollama sunucusunun hazır olmasını bekle
-  echo "► Ollama API bekleniyor..."
+  # Wait for Ollama server to be ready
+  echo "► Waiting for Ollama API..."
   until curl -sf http://localhost:11434/api/tags > /dev/null; do
     sleep 2
   done
 fi
 
-# Modelin hazır olmasını bekle (özellikle pre-bake başarısız olduysa veya yükleniyorsa)
-echo "► $MODEL modelinin hazır olması bekleniyor..."
+# Wait for model to be ready (especially if pre-bake failed or is loading)
+echo "► Waiting for $MODEL model to be ready..."
 until ollama list | grep -q "$MODEL"; do
-  echo "  ... model henüz listede yok, bekleniyor (pull gerekebilir) ..."
+  echo "  ... model not in list yet, waiting (may need pull) ..."
   ollama pull $MODEL
   sleep 5
 done
 
-# Modelin VRAM'e yüklenebilmesi için ek kısa bir bekleme (opsiyonel ama sağlıklı)
+# Short additional wait for model to load into VRAM (optional but healthy)
 sleep 2
-echo "► $MODEL hazır!"
+echo "► $MODEL ready!"
 
-# Embedding modeli (RAG ve Hybrid Search için)
-echo "► nomic-embed-text embedding modeli kontrol ediliyor..."
+# Embedding model (for RAG and Hybrid Search)
+echo "► Checking nomic-embed-text embedding model..."
 ollama pull nomic-embed-text
-echo "► nomic-embed-text hazır!"
+echo "► nomic-embed-text ready!"
 
-# Modeller artık imajın içinde (pre-baked), tekrar indirmeye gerek yok
+# Models are now pre-baked in the image, no need to download again
 # echo "► Model indiriliyor: $MODEL"
 # ollama pull $MODEL
 
-echo "► Başlatma modu kontrol ediliyor..."
+echo "► Checking startup mode..."
 if [ "$RUNPOD_SERVERLESS" = "true" ]; then
-  echo "► Mod: RunPod Serverless"
-  echo "► RunPod handler başlatılıyor..."
+  echo "► Mode: RunPod Serverless"
+  echo "► Starting RunPod handler..."
   python handler.py
 else
-  echo "► Mod: Standalone Pod (FastAPI Backend)"
-  echo "► FastAPI sunucusu başlatılıyor..."
+  echo "► Mode: Standalone Pod (FastAPI Backend)"
+  echo "► Starting FastAPI server..."
   
-  # Port çakışmasını önlemek için eski süreçleri temizle
+  # Kill old processes to prevent port conflicts
   pkill -f uvicorn || true
   
-  # Port numarasını ayarlanabilir yap (Varsayılan 8080)
+  # Make port configurable (Default 8080)
   PORT=${PORT:-8080}
-  echo "► API portu: $PORT"
+  echo "► API port: $PORT"
   
-  # FastAPI uygulamasını başlat
-  # --proxy-headers ve --forwarded-allow-ips '*' RunPod proxy arkasında çalışması için önemlidir.
+  # Start the FastAPI application
+  # --proxy-headers and --forwarded-allow-ips '*' are important for running behind RunPod proxy.
   uvicorn api:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'
 fi

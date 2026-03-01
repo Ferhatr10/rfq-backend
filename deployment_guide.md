@@ -1,70 +1,70 @@
-# RunPod Pod Kurulum ve Docker Build Rehberi
+# RunPod Pod Setup & Docker Build Guide
 
-Bu rehber, projenizi RunPod üzerinde bir GPU Pod içinde nasıl test edeceğinizi ve sonrasında Docker imajınızı nasıl hazır hale getireceğinizi adım adım açıklar.
+This guide explains step-by-step how to test your project inside a GPU Pod on RunPod and then prepare your Docker image for deployment.
 
-## Adım 1: RunPod Pod Başlatma
+## Step 1: Launch RunPod Pod
 
-1. **GPU Seçimi**: RunPod paneline gidin ve bir GPU instance seçin (A6000, L4 veya RTX 4090 idealdir).
-2. **Template/Image Seçimi**: 
-   - `pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime` veya `python:3.11` imajını kullanabilirsiniz.
-   - **Container Disk (Temporary Storage)**: En az **50 GB** yapın. `torch`, `cuda` ve `docling` paketleri çok yer kaplar.
-   - **Expose HTTP Ports**: `8888, 8080` portlarını açın.
-3. **Volume**: Kodunuzu saklamak için bir network volume bağlamanız önerilir.
+1. **GPU Selection**: Go to the RunPod panel and select a GPU instance (A6000, L4, or RTX 4090 are ideal).
+2. **Template/Image Selection**: 
+   - You can use `pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime` or `python:3.11` image.
+   - **Container Disk (Temporary Storage)**: Set at least **50 GB**. `torch`, `cuda`, and `docling` packages take up significant space.
+   - **Expose HTTP Ports**: Open ports `8888, 8080`.
+3. **Volume**: It is recommended to attach a network volume to persist your code.
 
-## Adım 2: Bağımlılıkların Kurulumu (Pod İçinde)
+## Step 2: Installing Dependencies (Inside Pod)
 
-Pod'a terminalden bağlandıktan sonra şu komutları sırasıyla çalıştırın:
+After connecting to the Pod via terminal, run the following commands in order:
 
-### 1. Sistem Paketleri
+### 1. System Packages
 ```bash
 apt-get update && apt-get install -y \
     libgl1 libglib2.0-0 libgomp1 curl zstd procps build-essential git
 ```
 
-### 2. Projeyi Klonlama
+### 2. Clone the Project
 ```bash
 git clone <repo_url>
-cd <repo_dizini>
+cd <repo_directory>
 ```
 
-### 3. Ollama Kurulumu ve Model Yükleme
+### 3. Ollama Installation & Model Download
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
-ollama serve & # Arkaplanda başlat
+ollama serve & # Start in background
 sleep 5
-ollama pull llama3 # Veya hangi modeli kullanacaksanız
+ollama pull llama3 # Or whichever model you plan to use
 ```
 
-### 3. Python Bağımlılıkları
+### 4. Python Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-## Adım 3: Çalıştırma ve Test
+## Step 3: Running & Testing
 
-Pod içinde uygulamayı başlatmak için:
+To start the application inside the Pod:
 ```bash
 chmod +x start.sh
 ./start.sh
 ```
 
-- **Test**: Pod'unuza atanan public IP ve 8080 portunu kullanarak `/process` endpoint'ine POST isteği atabilirsiniz.
+- **Testing**: You can send POST requests to the `/process` endpoint using your Pod's assigned public IP and port 8080.
 
 ---
 
-## Adım 4: Docker Build (Dışarıya Hazırlama)
+## Step 4: Docker Build (Preparing for Deployment)
 
-Kodun çalıştığından emin olduktan sonra, imajı build edip Docker Hub veya RunPod Registry'ye yüklemek için (kendi bilgisayarınızda):
+After confirming the code works, build the image and push it to Docker Hub or RunPod Registry (on your local machine):
 
 1. **Build**:
    ```bash
-   docker build -t kullanıcı_adınız/docling-rfq:latest .
+   docker build -t your_username/docling-rfq:latest .
    ```
 2. **Push**:
    ```bash
-   docker push kullanıcı_adınız/docling-rfq:latest
+   docker push your_username/docling-rfq:latest
    ```
 
-## Önemli İpuçları
-- **Bellek (VRAM)**: Docling ve Ollama aynı anda GPU kullandığı için en az 16GB-24GB VRAM'li bir GPU tercih edin.
-- **Port Yönlendirme**: FastAPI'nin dışarıdan erişilebilir olması için `uvicorn` host ayarını `0.0.0.0` yaptık, RunPod arayüzünde portun HTTP olarak işaretlendiğinden emin olun.
+## Important Tips
+- **Memory (VRAM)**: Since Docling and Ollama both use the GPU simultaneously, prefer a GPU with at least 16GB-24GB VRAM.
+- **Port Forwarding**: We set the `uvicorn` host to `0.0.0.0` so FastAPI is accessible externally. Make sure the port is marked as HTTP in the RunPod interface.

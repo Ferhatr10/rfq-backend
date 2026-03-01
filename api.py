@@ -110,9 +110,9 @@ class SearchRequest(BaseModel):
 @app.post("/discovery", tags=["Discovery"])
 def hybrid_search(request: SearchRequest):
     """
-    Hibrit arama endpoint'i.
-    - strict_mode=true: Kriterlere uymayanları eler.
-    - strict_mode=false: Herkesi puanlayarak getirir.
+    Hybrid search endpoint.
+    - strict_mode=true: Excludes suppliers not meeting criteria.
+    - strict_mode=false: Includes all suppliers, scored with match bonus.
     """
     try:
         from search import HybridSearchEngine
@@ -179,7 +179,7 @@ def get_metadata():
 @app.post("/ingest-file", tags=["Ingestion"])
 async def ingest_file(file: UploadFile = File(...)):
     """
-    Uzaktan dosya (CSV, JSON, SQLite) yükleme endpoint'i.
+    Remote file upload endpoint (CSV, JSON, SQLite).
     """
     import tempfile
     from pathlib import Path
@@ -188,7 +188,7 @@ async def ingest_file(file: UploadFile = File(...)):
     file_bytes = await file.read()
     ext = os.path.splitext(file.filename)[1].lower()
     
-    # Geçici dosya oluştur
+    # Create temporary file
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         tmp.write(file_bytes)
         tmp_path = Path(tmp.name)
@@ -201,9 +201,9 @@ async def ingest_file(file: UploadFile = File(...)):
         elif ext in ['.db', '.sqlite', '.sqlite3']:
             ingest_sqlite(str(tmp_path))
         else:
-            raise HTTPException(status_code=400, detail="Desteklenmeyen dosya formatı.")
+            raise HTTPException(status_code=400, detail="Unsupported file format.")
             
-        return {"success": True, "message": f"{file.filename} başarıyla işlendi."}
+        return {"success": True, "message": f"{file.filename} processed successfully."}
     except Exception as e:
         log.error(f"Ingest file error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -213,12 +213,12 @@ async def ingest_file(file: UploadFile = File(...)):
 @app.post("/ingest-data", tags=["Ingestion"])
 def ingest_data(data: list[dict]):
     """
-    Doğrudan JSON listesi göndererek veri yükleme endpoint'i.
+    Data ingestion endpoint via direct JSON list.
     """
     try:
         from ingest import process_records
         process_records(data)
-        return {"success": True, "message": f"{len(data)} kayıt başarıyla eklendi."}
+        return {"success": True, "message": f"{len(data)} records ingested successfully."}
     except Exception as e:
         log.error(f"Ingest data error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -226,12 +226,12 @@ def ingest_data(data: list[dict]):
 @app.post("/ingest", tags=["Ingestion"], deprecated=True)
 def trigger_ingest(csv_path: str):
     """
-    Eski yöntem: Yerel dosya yolunu tetikler.
+    Legacy method: Triggers ingestion via local file path.
     """
     try:
         from ingest import ingest_csv, ingest_json, ingest_sqlite
         if not os.path.exists(csv_path):
-            raise HTTPException(status_code=404, detail="Dosya bulunamadı.")
+            raise HTTPException(status_code=404, detail="File not found.")
         
         ext = os.path.splitext(csv_path)[1].lower()
         if ext == '.csv':
@@ -241,9 +241,9 @@ def trigger_ingest(csv_path: str):
         elif ext in ['.db', '.sqlite', '.sqlite3']:
             ingest_sqlite(csv_path)
         else:
-            raise HTTPException(status_code=400, detail="Geçersiz uzantı.")
+            raise HTTPException(status_code=400, detail="Invalid file extension.")
             
-        return {"success": True, "message": "İşlem tamamlandı."}
+        return {"success": True, "message": "Ingestion completed successfully."}
     except Exception as e:
         log.error(f"Ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -251,7 +251,7 @@ def trigger_ingest(csv_path: str):
 @app.post("/reset-db", tags=["Maintenance"])
 def reset_db():
     """
-    Tüm tedarikçi verilerini siler.
+    Deletes all supplier data from the database.
     """
     try:
         from database import get_connection
@@ -261,7 +261,7 @@ def reset_db():
         conn.commit()
         cur.close()
         conn.close()
-        return {"success": True, "message": "Tüm veriler silindi, veritabanı sıfırlandı."}
+        return {"success": True, "message": "All data deleted, database reset."}
     except Exception as e:
         log.error(f"Reset DB error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

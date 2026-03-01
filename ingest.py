@@ -13,8 +13,8 @@ log = logging.getLogger(__name__)
 
 def process_records(records):
     """
-    Ortak veri işleme ve DB'ye kaydetme mantığı.
-    Hem CSV hem JSON'dan gelen 'list of dict' yapısını kabul eder.
+    Common data processing and DB save logic.
+    Accepts 'list of dict' structure from both CSV and JSON sources.
     """
     init_db()
     embeddings = OllamaEmbeddings(model="nomic-embed-text")
@@ -25,9 +25,9 @@ def process_records(records):
     count = 0
     for row in records:
         s_id = row.get('supplier_id')
-        name = row.get('company_name') or row.get('name') or 'Bilinmeyen Tedarikçi'
+        name = row.get('company_name') or row.get('name') or 'Unknown Supplier'
         
-        # Liste formatındaki verileri (['A', 'B']) güvenli bir şekilde parçala
+        # Safely parse list-formatted data (['A', 'B'])
         def parse_list(val):
             if not val: return []
             if isinstance(val, list): return val
@@ -43,12 +43,12 @@ def process_records(records):
         certs = parse_list(row.get('certifications'))
         regu = parse_list(row.get('regulatory_compliance'))
         
-        # Embedding için açıklama (Search Engine burayı kullanıyor)
+        # Description for embedding (Search Engine uses this)
         full_desc = f"Capabilities: {', '.join(capabilities)}. Materials: {', '.join(materials)}."
         
-        # Eksik veri kontrolü ve uyarılar
+        # Missing data check and warnings
         if not capabilities and not materials:
-            log.warning(f"(!) {name}: Yetenek veya materyal bilgisi yok. Vektör aramasında bulunamayabilir.")
+            log.warning(f"(!) {name}: No capability or material data. May not appear in vector search.")
         
         sop_date = row.get('sop_date')
         try:
@@ -60,14 +60,14 @@ def process_records(records):
             lat = float(row.get('lat')) if row.get('lat') is not None else None
             lng = float(row.get('lng')) if row.get('lng') is not None else None
             if lat is None or lng is None:
-                log.warning(f"(!) {name}: Koordinat eksik. Harita aramalarında çıkmayacak.")
+                log.warning(f"(!) {name}: Missing coordinates. Will not appear in map searches.")
         except:
             lat, lng = None, None
 
         city = row.get('city')
         country = row.get('country')
         
-        log.info(f"Vektör oluşturuluyor ({count+1}): {name}")
+        log.info(f"Generating vector ({count+1}): {name}")
         vector = embeddings.embed_query(full_desc)
         
         cur.execute("""
@@ -78,21 +78,21 @@ def process_records(records):
         count += 1
         if count % 10 == 0:
             conn.commit()
-            log.info(f"{count} kayıt işlendi...")
+            log.info(f"{count} records processed...")
                 
     conn.commit()
     cur.close()
     conn.close()
-    log.info(f"Yükleme tamamlandı. Toplam {count} kayıt.")
+    log.info(f"Ingestion completed. Total {count} records.")
 
 def ingest_csv(path):
-    log.info(f"CSV Yükleme: {path}")
+    log.info(f"CSV Ingestion: {path}")
     with open(path, mode='r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         process_records(list(reader))
 
 def ingest_json(path):
-    log.info(f"JSON Yükleme: {path}")
+    log.info(f"JSON Ingestion: {path}")
     with open(path, mode='r', encoding='utf-8') as f:
         data = json.load(f)
         if isinstance(data, list):
@@ -102,13 +102,13 @@ def ingest_json(path):
 
 def ingest_sqlite(path, table_name="suppliers"):
     """
-    SQLite dosyasından veri çeker. 
-    Varsayılan tablo adını 'suppliers' kabul eder.
+    Reads data from a SQLite file.
+    Defaults to the 'suppliers' table.
     """
-    log.info(f"SQLite Yükleme: {path} (Tablo: {table_name})")
+    log.info(f"SQLite Ingestion: {path} (Table: {table_name})")
     try:
         conn = sqlite3.connect(path)
-        # Sütun adlarını dict olarak almak için row_factory ayarı
+        # Set row_factory to get column names as dict
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
@@ -118,16 +118,16 @@ def ingest_sqlite(path, table_name="suppliers"):
         process_records(rows)
         conn.close()
     except Exception as e:
-        log.error(f"SQLite hata: {e}")
+        log.error(f"SQLite error: {e}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Kullanım: python ingest.py <dosya_yolu>")
+        print("Usage: python ingest.py <file_path>")
         sys.exit(1)
     
     file_path = sys.argv[1]
     if not os.path.exists(file_path):
-        print(f"Hata: {file_path} bulunamadı.")
+        print(f"Error: {file_path} not found.")
         sys.exit(1)
 
     ext = os.path.splitext(file_path)[1].lower()
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     elif ext == '.json':
         ingest_json(file_path)
     elif ext in ['.db', '.sqlite', '.sqlite3']:
-        # Varsayılan tablo adı: suppliers
+        # Default table name: suppliers
         ingest_sqlite(file_path)
     else:
-        print("Hata: Sadece .csv, .json veya .db/.sqlite destekleniyor.")
+        print("Error: Only .csv, .json, or .db/.sqlite files are supported.")
